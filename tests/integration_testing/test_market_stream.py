@@ -48,17 +48,15 @@ async def ws_client(client_id, stop_event):
     try:
         async with websockets.connect(WS_URI) as ws:
             while not stop_event.is_set():
-                start = time.time()
-                msg = await ws.recv()
-                duration = time.time() - start
-                metrics["ws_messages_received"] += 1
-                metrics["ws_latency"].append(duration)
-                data = json.loads(msg)
-                #snap = data.get("snapshot", {})
-                print(data)
-                
-                
-              
+                try:
+                    start = time.time()
+                    msg = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                    duration = time.time() - start
+                    metrics["ws_messages_received"] += 1
+                    metrics["ws_latency"].append(duration)
+                    data = json.loads(msg)
+                except asyncio.TimeoutError:
+                    continue   # wait again
     except Exception:
         metrics["ws_errors"] += 1
 

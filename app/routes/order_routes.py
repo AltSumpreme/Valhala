@@ -1,62 +1,36 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter,Body
+from asyncio import Queue, create_task, get_event_loop
+from concurrent.futures import ThreadPoolExecutor
 from app.books.books import order_books
+from typing import List, Dict,Union
 import matching_engine
-import logging
 
 router = APIRouter()
-logger = logging.getLogger(__name__) 
+
+order_queue = Queue()
+executor = ThreadPoolExecutor(max_workers=8)  
+
+
+def match_order(order):
+    symbol = order["symbol"]
+    book = order_books.setdefault(symbol, matching_engine.OrderBook(symbol))
+    return book.add_order(float(order["price"]), float(order["quantity"]), order["side"].upper(), order["order_type"].upper())
+
+async def queue_consumer():
+    while True:
+        order = await order_queue.get()
+        await get_event_loop().run_in_executor(executor, match_order, order)
+        order_queue.task_done()
+
+@router.on_event("startup")
+async def run_consumer():
+    create_task(queue_consumer())
 
 @router.post("/orders")
-async def submit_order(order_request: Request):
-    try:
-        body = await order_request.json()
-
-        # Handle batch orders
-        if isinstance(body, list):
-            results = []
-            for order in body:
-                result = await _process_single_order(order)
-                results.append(result)
-            return {"status": "success", "orders": results}
-
-        # Handle single order
-        elif isinstance(body, dict):
-            result = await _process_single_order(body)
-            return {"status": "success", "order": result}
-
-        else:
-            logger.warning("Invalid request body type: %s", type(body))
-            return {"status": "error", "message": "Invalid request body."}
-
-    except Exception as e:
-        logger.error("Error processing order: %s, exception: %s", body, e, exc_info=True)
-        return {"status": "error", "message": str(e)}
-
-async def _process_single_order(order: dict):
-    """Validate and submit a single order to the matching engine."""
-    symbol = order.get("symbol")
-    side = order.get("side", "").upper()
-    order_type = order.get("order_type", "").upper()
-    price = float(order.get("price", 0))
-    quantity = float(order.get("quantity", 0))
-
-    # Validation
-    if symbol != "BTC-USD":
-        logger.warning("Invalid or missing symbol: %s", order)
-        return {"status": "error", "message": "Invalid or missing symbol."}
-    if price <= 0 or quantity <= 0:
-        logger.warning("Invalid order parameters: %s", order)
-        return {"status": "error", "message": "Price and quantity must be positive numbers."}
-    if order_type not in ["LIMIT", "MARKET", "IOC", "FOK"]:
-        logger.warning("Invalid order type: %s", order)
-        return {"status": "error", "message": "Invalid order type."}
-    if side not in ["BUY", "SELL"]:
-        logger.warning("Invalid order side: %s", order)
-        return {"status": "error", "message": "Invalid order side."}
-
-    # Get or create order book
-    book = order_books.setdefault(symbol, matching_engine.OrderBook(symbol))
-
-    # Submit order
-    trades = book.add_order(price, quantity, side, order_type)
-    return {"status": "success", "symbol": symbol, "trades_executed": len(trades)}
+async def submit_orders(orders: Union[Dict, List[Dict]] = Body(...)):
+    #single order wrapped in a list
+    if isinstance(orders,dict):
+        orders = [orders]
+    for order in orders:
+        await order_queue.put(order)
+    return {"status": "queued", "count": len(orders)}
