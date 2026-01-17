@@ -121,18 +121,13 @@ Implements a basic maker-taker fee model:
 git clone https://github.com/yourusername/repo-name.git
 cd repo-name
 ```
-
-### Build the C++ Engine
-```bash
-mkdir build
-cd build
-cmake ..
-```
+### Install 
 
 ### Install Python Dependencies
 ```bash
 uv sync
 ```
+
 
 ### Build the Python Bindings
 - From the root directory, run:
